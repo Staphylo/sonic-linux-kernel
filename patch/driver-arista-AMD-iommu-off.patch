@@ -1,0 +1,60 @@
+In kernel v4.13 a patchset was introduced to improve AMD IOMMU initialisation to
+support disabling the IOMMU at boot. Before then, setting amd_iommu=off on the
+cmdline would just instruct the IOMMU driver to not load.
+
+The patchset includes patch ffa080ebb540 which changes the meaning of amd_iommu=off
+such that the driver now tries to do some basic initialisation and then explicitly
+disables the hardware rather than just skipping the init.
+
+Arista AMD cpu boards prior to woodpecker included IOMMU hardware and IVRS tables
+but is not supported by AMD and Aboot does not initialise the tables. To get around
+this we set amd_iommu=off for these devices.
+
+This patch re-implements the previous meaning for amd_iommu=off by putting the new
+behaviour under a new option: amd_iommu=disabled.
+
+This works by refraining to do any basic initialisation when `amd_iommu=off` is set.
+Otherwise, amd/iommu code may error on boot while using values from IVRS that are
+corrupted on some duts running older Aboot versions.
+
+  AMD-Vi: Can not reserve memory region 0-80000 for mmio
+  AMD-Vi: This is a BIOS bug. Please contact your hardware vendor
+  Trying to free nonexistent resource <0000000000000000-000000000007ffff>
+
+Signed-off-by: James Sewart <jamessewart@arista.com>
+Signed-off-by: Samuel Angebault <staphylo@arista.com>
+
+---
+ drivers/iommu/amd_iommu_init.c |    5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/iommu/amd_iommu_init.c b/drivers/iommu/amd_iommu_init.c
+index 4930f4358..68f1e86c1 100644
+--- a/drivers/iommu/amd_iommu_init.c
++++ b/drivers/iommu/amd_iommu_init.c
+@@ -157,6 +157,7 @@ static int amd_iommu_xt_mode = IRQ_REMAP_X2APIC_MODE;
+ 
+ static bool amd_iommu_detected;
+ static bool __initdata amd_iommu_disabled;
++static bool __initdata amd_iommu_off;
+ static int amd_iommu_target_ivhd_type;
+ 
+ u16 amd_iommu_last_bdf;			/* largest PCI device id we have
+@@ -2430,7 +2431,7 @@ static int __init early_amd_iommu_init(void)
+ 	acpi_status status;
+ 	int i, remap_cache_sz, ret = 0;
+ 
+-	if (!amd_iommu_detected)
++	if (!amd_iommu_detected || amd_iommu_off)
+ 		return -ENODEV;
+ 
+ 	status = acpi_get_table("IVRS", 0, &ivrs_base);
+@@ -2851,6 +2852,8 @@ static int __init parse_amd_iommu_options(char *str)
+ 		if (strncmp(str, "fullflush", 9) == 0)
+ 			amd_iommu_unmap_flush = true;
+ 		if (strncmp(str, "off", 3) == 0)
++			amd_iommu_off = true;
++		if (strncmp(str, "disabled", 8) == 0)
+ 			amd_iommu_disabled = true;
+ 		if (strncmp(str, "force_isolation", 15) == 0)
+ 			amd_iommu_force_isolation = true;
